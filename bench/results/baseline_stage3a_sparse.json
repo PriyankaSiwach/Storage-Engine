@@ -1,0 +1,36 @@
+{
+  "timestamp": "2026-09-20T21:20:21.540322+00:00",
+  "settings": {
+    "keys": 20000,
+    "lookups": 10000,
+    "memtable_bytes": 100000,
+    "seed": 42,
+    "sstables": 22,
+    "sparse_index_entries": 1264,
+    "sync_writes": false
+  },
+  "benchmarks": [
+    {
+      "name": "missing keys",
+      "lookups": 10000,
+      "sstables_probed": 220000,
+      "sstables_probed_per_lookup": 22.0,
+      "disk_reads": 219564,
+      "disk_reads_per_lookup": 21.9564,
+      "p50_us": 172.958,
+      "p99_us": 220.58342000000002,
+      "lookups_per_sec": 5782.720223004638
+    },
+    {
+      "name": "existing keys",
+      "lookups": 10000,
+      "sstables_probed": 115633,
+      "sstables_probed_per_lookup": 11.5633,
+      "disk_reads": 115502,
+      "disk_reads_per_lookup": 11.5502,
+      "p50_us": 104.6875,
+      "p99_us": 221.50042000000002,
+      "lookups_per_sec": 9504.236264303823
+    }
+  ]
+}

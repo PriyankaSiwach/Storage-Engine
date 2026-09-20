@@ -1,0 +1,35 @@
+{
+  "timestamp": "2026-09-20T07:24:26.811603+00:00",
+  "settings": {
+    "keys": 20000,
+    "lookups": 10000,
+    "memtable_bytes": 100000,
+    "seed": 42,
+    "sstables": 22,
+    "sync_writes": false
+  },
+  "benchmarks": [
+    {
+      "name": "missing keys",
+      "lookups": 10000,
+      "sstables_probed": 220000,
+      "sstables_probed_per_lookup": 22.0,
+      "disk_reads": 0,
+      "disk_reads_per_lookup": 0.0,
+      "p50_us": 3.5,
+      "p99_us": 4.667,
+      "lookups_per_sec": 277913.7007369132
+    },
+    {
+      "name": "existing keys",
+      "lookups": 10000,
+      "sstables_probed": 115633,
+      "sstables_probed_per_lookup": 11.5633,
+      "disk_reads": 10000,
+      "disk_reads_per_lookup": 1.0,
+      "p50_us": 4.208,
+      "p99_us": 6.333,
+      "lookups_per_sec": 233979.39020618898
+    }
+  ]
+}

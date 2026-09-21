@@ -1,8 +1,8 @@
-# minilsm — Stage 3a
+# minilsm — Stage 3b
 
 A from-scratch LSM-tree key-value storage engine.
 
-**So far:** MemTable + WAL + SSTables with a **sparse index**. No Bloom filters or compaction yet.
+**So far:** MemTable + WAL + SSTables with a **sparse index** and per-SSTable **Bloom filters**. No compaction yet.
 
 ## How it works so far
 
@@ -14,6 +14,10 @@ A from-scratch LSM-tree key-value storage engine.
 ### Sparse index
 
 Each SSTable keeps only every `index_interval`-th key (plus the first) in memory, as a sorted `(key, offset)` list. A lookup binary-searches that list, then reads one on-disk block between two index entries. That uses far less RAM than a full key→offset map, at the cost of scanning a small run of records per hit (and still reading a block for misses that fall inside the key range).
+
+### Bloom filters
+
+Before touching disk, each SSTable can ask a Bloom filter whether a key is **definitely absent**. If so, that SSTable is skipped (no block read). Bloom filters never produce false negatives (every inserted key, including tombstones, is remembered), but they can produce **false positives**: the filter says "maybe" and we still read a block only to find the key is not there. `bloom_bits_per_key` trades memory for a lower false-positive rate; set it to `0` to disable filters for A/B measurements.
 
 ## Install
 
@@ -39,10 +43,10 @@ Commands: `put <k> <v>`, `get <k>`, `delete <k>`, `quit`.
 
 ## Benchmarks
 
-Read benchmark (missing keys sorted inside the real key range vs existing keys):
+Same workload with Bloom off then on (results side by side):
 
 ```bash
 python bench/bench_reads.py --keys 20000 --lookups 10000 --memtable-bytes 100000 --seed 42
 ```
 
-Results are written to `bench/results/` (e.g. `baseline_stage3a_sparse.json`). Older baselines such as `baseline_stage2.json` are left alone.
+Results are written to `bench/results/stage3b_bloom.json`. Older baselines (`baseline_stage2.json`, `baseline_stage3a_sparse.json`) are left alone.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read benchmark for minilsm (sparse index Stage 3a; no Bloom filters yet)."""
+"""Read benchmark for minilsm Stage 3b: Bloom on vs off, same workload."""
 
 from __future__ import annotations
 
@@ -43,32 +43,46 @@ def _summarize(
     name: str,
     lookups: int,
     latencies_ns: list[int],
-    sstables_probed: int,
-    disk_reads: int,
+    db: DB,
 ) -> dict:
     total_ns = sum(latencies_ns)
     elapsed_s = total_ns / 1e9 if total_ns else 0.0
     qps = lookups / elapsed_s if elapsed_s else 0.0
+    probed = db.stats.sstables_probed
+    disk_reads = db.stats.disk_reads
+    bloom_skips = db.stats.bloom_skips
+    bloom_fps = db.stats.bloom_false_positives
+    # Observed FP rate (missing-key runs): among SSTable checks where the Bloom
+    # filter said "maybe" (did not skip), what fraction were false positives?
+    # Denominator = probes that passed the filter = sstables_probed - bloom_skips.
+    maybe_checks = probed - bloom_skips
+    observed_fp_rate = (bloom_fps / maybe_checks) if maybe_checks else 0.0
     return {
         "name": name,
         "lookups": lookups,
-        "sstables_probed": sstables_probed,
-        "sstables_probed_per_lookup": sstables_probed / lookups if lookups else 0.0,
+        "sstables_probed": probed,
+        "sstables_probed_per_lookup": probed / lookups if lookups else 0.0,
         "disk_reads": disk_reads,
         "disk_reads_per_lookup": disk_reads / lookups if lookups else 0.0,
+        "bloom_skips": bloom_skips,
+        "bloom_false_positives": bloom_fps,
+        "observed_fp_rate": observed_fp_rate,
         "p50_us": _percentile_us(latencies_ns, 50),
         "p99_us": _percentile_us(latencies_ns, 99),
         "lookups_per_sec": qps,
     }
 
 
-def _print_table(rows: list[dict]) -> None:
+def _print_table(title: str, rows: list[dict]) -> None:
+    print(f"\n=== {title} ===")
     headers = [
         ("benchmark", "name", "s"),
         ("probed", "sstables_probed", "d"),
-        ("probed/lookup", "sstables_probed_per_lookup", ".2f"),
         ("disk_reads", "disk_reads", "d"),
         ("disk/lookup", "disk_reads_per_lookup", ".2f"),
+        ("bloom_skips", "bloom_skips", "d"),
+        ("bloom_fp", "bloom_false_positives", "d"),
+        ("fp_rate", "observed_fp_rate", ".4f"),
         ("p50_us", "p50_us", ".1f"),
         ("p99_us", "p99_us", ".1f"),
         ("lookups/s", "lookups_per_sec", ".0f"),
@@ -92,8 +106,23 @@ def _print_table(rows: list[dict]) -> None:
         print("  ".join(row_cells[i].ljust(widths[i]) for i in range(len(headers))))
 
 
+def _run_pair(
+    db: DB,
+    missing_keys: list[str],
+    existing_keys: list[str],
+) -> tuple[dict, dict]:
+    db.stats.reset()
+    missing_lat = _run_lookups(db, missing_keys)
+    missing_row = _summarize("missing keys", len(missing_keys), missing_lat, db)
+
+    db.stats.reset()
+    existing_lat = _run_lookups(db, existing_keys)
+    existing_row = _summarize("existing keys", len(existing_keys), existing_lat, db)
+    return missing_row, existing_row
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="minilsm Stage 3a read benchmark")
+    parser = argparse.ArgumentParser(description="minilsm Stage 3b Bloom benchmark")
     parser.add_argument("--keys", type=int, default=20_000)
     parser.add_argument("--lookups", type=int, default=10_000)
     parser.add_argument("--memtable-bytes", type=int, default=100_000)
@@ -106,6 +135,10 @@ def main() -> None:
     insert_order = keys[:]
     rng.shuffle(insert_order)
 
+    # Same missing/existing lists for both Bloom settings.
+    missing_keys = [f"key_{i:05d}_x" for i in range(args.lookups)]
+    existing_keys = [rng.choice(keys) for _ in range(args.lookups)]
+
     print(
         f"sync_writes=False (load faster; not measuring durability). "
         f"keys={args.keys} lookups={args.lookups} "
@@ -113,49 +146,53 @@ def main() -> None:
     )
     print(
         "Missing keys use names like key_00000_x so they sort INSIDE the real "
-        "key range (forces sparse-index block reads, unlike key_ prefix misses)."
+        "key range (same workload as Stage 3a)."
     )
+    print("Running twice: bloom_bits_per_key=0 then bloom_bits_per_key=10.")
 
     with tempfile.TemporaryDirectory(prefix="minilsm_bench_") as tmp:
         db_dir = Path(tmp)
-        opts = Options(sync_writes=False, memtable_max_bytes=args.memtable_bytes)
-        db = DB.open(str(db_dir), opts)
-
+        # Write once; Bloom is rebuilt from keys on open, so we can reopen on/off.
+        write_opts = Options(
+            sync_writes=False,
+            memtable_max_bytes=args.memtable_bytes,
+            bloom_bits_per_key=0,
+        )
+        db = DB.open(str(db_dir), write_opts)
         for key in insert_order:
             db.put(key, value)
         db.flush()
+        db.close()
 
         sst_count = len(list(db_dir.glob("sst_*.sst")))
-        sparse_entries = sum(sst.index_entry_count() for sst in db._sstables)
-        print(f"SSTables after load+flush: {sst_count}")
-        print(f"Sparse index entries (all SSTables): {sparse_entries}")
+        results_by_mode: dict[str, dict] = {}
 
-        # Inside the real key range: key_00000_x sorts between key_00000 and key_00001.
-        missing_keys = [f"key_{i:05d}_x" for i in range(args.lookups)]
-        existing_keys = [rng.choice(keys) for _ in range(args.lookups)]
+        for bloom_bits in (0, 10):
+            opts = Options(
+                sync_writes=False,
+                memtable_max_bytes=args.memtable_bytes,
+                bloom_bits_per_key=bloom_bits,
+            )
+            db = DB.open(str(db_dir), opts)
+            sparse_entries = sum(sst.index_entry_count() for sst in db._sstables)
+            bloom_bytes = sum(sst.bloom_size_bytes() for sst in db._sstables)
 
-        db.stats.reset()
-        missing_lat = _run_lookups(db, missing_keys)
-        missing_row = _summarize(
-            "missing keys",
-            args.lookups,
-            missing_lat,
-            db.stats.sstables_probed,
-            db.stats.disk_reads,
-        )
+            missing_row, existing_row = _run_pair(db, missing_keys, existing_keys)
+            label = f"bloom_bits_per_key={bloom_bits}"
+            _print_table(label, [missing_row, existing_row])
+            print(
+                f"sparse_index_entries={sparse_entries}  "
+                f"bloom_memory_bytes={bloom_bytes}"
+            )
 
-        db.stats.reset()
-        existing_lat = _run_lookups(db, existing_keys)
-        existing_row = _summarize(
-            "existing keys",
-            args.lookups,
-            existing_lat,
-            db.stats.sstables_probed,
-            db.stats.disk_reads,
-        )
-
-        print()
-        _print_table([missing_row, existing_row])
+            results_by_mode[label] = {
+                "bloom_bits_per_key": bloom_bits,
+                "sstables": sst_count,
+                "sparse_index_entries": sparse_entries,
+                "bloom_memory_bytes": bloom_bytes,
+                "benchmarks": [missing_row, existing_row],
+            }
+            db.close()
 
         results = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -165,19 +202,16 @@ def main() -> None:
                 "memtable_bytes": args.memtable_bytes,
                 "seed": args.seed,
                 "sstables": sst_count,
-                "sparse_index_entries": sparse_entries,
                 "sync_writes": False,
             },
-            "benchmarks": [missing_row, existing_row],
+            "modes": results_by_mode,
         }
 
         out_dir = ROOT / "bench" / "results"
         out_dir.mkdir(parents=True, exist_ok=True)
-        out_path = out_dir / "baseline_stage3a_sparse.json"
+        out_path = out_dir / "stage3b_bloom.json"
         out_path.write_text(json.dumps(results, indent=2) + "\n")
         print(f"\nWrote {out_path}")
-
-        db.close()
 
 
 if __name__ == "__main__":

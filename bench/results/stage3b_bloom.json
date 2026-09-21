@@ -1,0 +1,85 @@
+{
+  "timestamp": "2026-09-20T23:38:11.481232+00:00",
+  "settings": {
+    "keys": 20000,
+    "lookups": 10000,
+    "memtable_bytes": 100000,
+    "seed": 42,
+    "sstables": 22,
+    "sync_writes": false
+  },
+  "modes": {
+    "bloom_bits_per_key=0": {
+      "bloom_bits_per_key": 0,
+      "sstables": 22,
+      "sparse_index_entries": 1264,
+      "bloom_memory_bytes": 0,
+      "benchmarks": [
+        {
+          "name": "missing keys",
+          "lookups": 10000,
+          "sstables_probed": 220000,
+          "sstables_probed_per_lookup": 22.0,
+          "disk_reads": 219564,
+          "disk_reads_per_lookup": 21.9564,
+          "bloom_skips": 0,
+          "bloom_false_positives": 0,
+          "observed_fp_rate": 0.0,
+          "p50_us": 175.8125,
+          "p99_us": 225.25208000000003,
+          "lookups_per_sec": 5693.815961117737
+        },
+        {
+          "name": "existing keys",
+          "lookups": 10000,
+          "sstables_probed": 115633,
+          "sstables_probed_per_lookup": 11.5633,
+          "disk_reads": 115502,
+          "disk_reads_per_lookup": 11.5502,
+          "bloom_skips": 0,
+          "bloom_false_positives": 0,
+          "observed_fp_rate": 0.0,
+          "p50_us": 105.917,
+          "p99_us": 224.00083,
+          "lookups_per_sec": 9397.313124178407
+        }
+      ]
+    },
+    "bloom_bits_per_key=10": {
+      "bloom_bits_per_key": 10,
+      "sstables": 22,
+      "sparse_index_entries": 1264,
+      "bloom_memory_bytes": 25011,
+      "benchmarks": [
+        {
+          "name": "missing keys",
+          "lookups": 10000,
+          "sstables_probed": 220000,
+          "sstables_probed_per_lookup": 22.0,
+          "disk_reads": 1873,
+          "disk_reads_per_lookup": 0.1873,
+          "bloom_skips": 218123,
+          "bloom_false_positives": 1877,
+          "observed_fp_rate": 1.0,
+          "p50_us": 37.417,
+          "p99_us": 58.37542000000001,
+          "lookups_per_sec": 25361.344248226935
+        },
+        {
+          "name": "existing keys",
+          "lookups": 10000,
+          "sstables_probed": 115633,
+          "sstables_probed_per_lookup": 11.5633,
+          "disk_reads": 10929,
+          "disk_reads_per_lookup": 1.0929,
+          "bloom_skips": 104704,
+          "bloom_false_positives": 929,
+          "observed_fp_rate": 0.08500320248879129,
+          "p50_us": 30.083,
+          "p99_us": 61.37542000000001,
+          "lookups_per_sec": 32709.70021991517
+        }
+      ]
+    }
+  }
+}

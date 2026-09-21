@@ -127,12 +127,20 @@ def test_many_puts_with_multiple_flushes(tmp_path: Path) -> None:
 
 
 def _write_sst_with_keys(
-    tmp_path: Path, keys: list[str], *, index_interval: int
+    tmp_path: Path,
+    keys: list[str],
+    *,
+    index_interval: int,
+    bloom_bits_per_key: int = 0,
 ) -> SSTable:
     items = [(k, (f"v-{k}", False)) for k in keys]
     path = tmp_path / "sst_000001.sst"
     SSTable.write(path, items)
-    return SSTable(path, index_interval=index_interval)
+    return SSTable(
+        path,
+        index_interval=index_interval,
+        bloom_bits_per_key=bloom_bits_per_key,
+    )
 
 
 def test_sparse_index_entry_count(tmp_path: Path) -> None:
@@ -147,7 +155,7 @@ def test_sparse_index_finds_first_middle_last_in_block(tmp_path: Path) -> None:
     keys = [f"k{i:02d}" for i in range(20)]
     sst = _write_sst_with_keys(tmp_path, keys, index_interval=4)
     for key in ("k00", "k02", "k03"):  # first, middle, last of first block
-        found, value, is_tombstone, did_read = sst.get(key)
+        found, value, is_tombstone, did_read, _, _ = sst.get(key)
         assert found and not is_tombstone and did_read
         assert value == f"v-{key}"
     sst.close()
@@ -157,7 +165,10 @@ def test_sparse_missing_between_index_keys_one_disk_read(tmp_path: Path) -> None
     keys = [f"k{i:02d}" for i in range(20)]
     path = tmp_path / "data"
     path.mkdir()
-    db = DB.open(str(path), Options(index_interval=4, memtable_max_bytes=10**9))
+    db = DB.open(
+        str(path),
+        Options(index_interval=4, memtable_max_bytes=10**9, bloom_bits_per_key=0),
+    )
     for k in keys:
         db.put(k, f"v-{k}")
     db.flush()
@@ -173,7 +184,10 @@ def test_sparse_key_before_first_zero_disk_reads(tmp_path: Path) -> None:
     keys = [f"k{i:02d}" for i in range(8)]
     path = tmp_path / "data"
     path.mkdir()
-    db = DB.open(str(path), Options(index_interval=4, memtable_max_bytes=10**9))
+    db = DB.open(
+        str(path),
+        Options(index_interval=4, memtable_max_bytes=10**9, bloom_bits_per_key=0),
+    )
     for k in keys:
         db.put(k, "v")
     db.flush()
@@ -187,7 +201,7 @@ def test_sparse_key_before_first_zero_disk_reads(tmp_path: Path) -> None:
 def test_sparse_key_after_last_not_found(tmp_path: Path) -> None:
     keys = [f"k{i:02d}" for i in range(8)]
     sst = _write_sst_with_keys(tmp_path, keys, index_interval=4)
-    found, value, is_tombstone, did_read = sst.get("zzz")
+    found, value, is_tombstone, did_read, _, _ = sst.get("zzz")
     assert not found and value is None and not is_tombstone and did_read
     sst.close()
 
@@ -202,8 +216,8 @@ def test_sparse_tombstone_hides_key(tmp_path: Path) -> None:
             ("c", ("3", False)),
         ],
     )
-    sst = SSTable(path, index_interval=2)
-    found, value, is_tombstone, _ = sst.get("b")
+    sst = SSTable(path, index_interval=2, bloom_bits_per_key=10)
+    found, value, is_tombstone, _, _, _ = sst.get("b")
     assert found and is_tombstone and value is None
     sst.close()
 

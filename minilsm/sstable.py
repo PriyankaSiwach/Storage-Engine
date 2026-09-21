@@ -5,6 +5,7 @@ import os
 import re
 from pathlib import Path
 
+from minilsm.bloom import BloomFilter
 from minilsm.records import DELETE, PUT, encode_record, parse_record
 
 _SST_NAME = re.compile(r"^sst_(\d+)\.sst$")
@@ -24,17 +25,25 @@ def list_sst_numbers(dir_path: Path) -> list[int]:
 
 
 class SSTable:
-    """Immutable sorted table on disk with a sparse in-memory index."""
+    """Immutable sorted table on disk with a sparse index and optional Bloom filter."""
 
-    def __init__(self, path: Path, *, index_interval: int = 16) -> None:
+    def __init__(
+        self,
+        path: Path,
+        *,
+        index_interval: int = 16,
+        bloom_bits_per_key: int = 10,
+    ) -> None:
         if index_interval < 1:
             raise ValueError("index_interval must be >= 1")
         self.path = path
         self._index_interval = index_interval
+        self._bloom_bits_per_key = bloom_bits_per_key
         self._file = open(path, "rb")
         # Sparse index: every index_interval-th record (always includes the first).
         self._index: list[tuple[str, int]] = []
         self._index_keys: list[str] = []
+        self._bloom: BloomFilter | None = None
         self._file_size = path.stat().st_size
         self._build_index()
 
@@ -64,32 +73,50 @@ class SSTable:
         data = self._file.read()
         offset = 0
         record_num = 0
+        all_keys: list[str] = []
         while offset < len(data):
             # SSTables are written atomically; a bad CRC here is real corruption.
             key, _value, _record_type, next_offset = parse_record(data, offset)
+            all_keys.append(key)  # include tombstones so deletes stay visible to Bloom
             if record_num % self._index_interval == 0:
                 self._index.append((key, offset))
                 self._index_keys.append(key)
             record_num += 1
             offset = next_offset
+
+        if self._bloom_bits_per_key > 0 and all_keys:
+            self._bloom = BloomFilter(len(all_keys), self._bloom_bits_per_key)
+            for key in all_keys:
+                self._bloom.add(key)
+
         self._file.seek(0)
 
     def index_entry_count(self) -> int:
         return len(self._index)
 
-    def get(self, key: str) -> tuple[bool, str | None, bool, bool]:
-        """Return (found, value, is_tombstone, did_disk_read).
+    def bloom_size_bytes(self) -> int:
+        return self._bloom.size_bytes() if self._bloom is not None else 0
 
-        Binary-search the sparse index, then read one block from that offset to
-        the next index entry (or EOF). One disk_read per block read.
+    def get(
+        self, key: str
+    ) -> tuple[bool, str | None, bool, bool, bool, bool]:
+        """Return (found, value, is_tombstone, did_disk_read, bloom_skip, bloom_fp).
+
+        Bloom "definitely not" → skip the block read. "Maybe" + miss after the
+        block scan → false positive.
         """
+        if self._bloom is not None and not self._bloom.might_contain(key):
+            return False, None, False, False, True, False
+
         if not self._index:
-            return False, None, False, False
+            return False, None, False, False, False, False
 
         # Last indexed key <= target; if target is before the first key, skip I/O.
         idx = bisect.bisect_right(self._index_keys, key) - 1
         if idx < 0:
-            return False, None, False, False
+            # Bloom said maybe but key is before this file's range — treat as miss.
+            bloom_fp = self._bloom is not None
+            return False, None, False, False, False, bloom_fp
 
         start = self._index[idx][1]
         end = (
@@ -107,13 +134,15 @@ class SSTable:
             if rec_key == key:
                 is_tombstone = record_type == DELETE
                 if is_tombstone:
-                    return True, None, True, True
-                return True, value, False, True
+                    return True, None, True, True, False, False
+                return True, value, False, True, False, False
             if rec_key > key:
-                return False, None, False, True
+                bloom_fp = self._bloom is not None
+                return False, None, False, True, False, bloom_fp
             offset = next_offset
 
-        return False, None, False, True
+        bloom_fp = self._bloom is not None
+        return False, None, False, True, False, bloom_fp
 
     def close(self) -> None:
         self._file.close()

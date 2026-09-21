@@ -16,14 +16,18 @@ class Stats:
 
     sstables_probed: int = 0
     disk_reads: int = 0
+    bloom_skips: int = 0
+    bloom_false_positives: int = 0
 
     def reset(self) -> None:
         self.sstables_probed = 0
         self.disk_reads = 0
+        self.bloom_skips = 0
+        self.bloom_false_positives = 0
 
 
 class DB:
-    """Minimal durable key-value store: MemTable + WAL + SSTables (Stage 3a)."""
+    """Minimal durable key-value store: MemTable + WAL + SSTables (Stage 3b)."""
 
     def __init__(
         self,
@@ -55,7 +59,11 @@ class DB:
 
         numbers = list_sst_numbers(path)
         sstables = [
-            SSTable(sst_path(path, n), index_interval=opts.index_interval)
+            SSTable(
+                sst_path(path, n),
+                index_interval=opts.index_interval,
+                bloom_bits_per_key=opts.bloom_bits_per_key,
+            )
             for n in numbers
         ]
         next_sst_number = (numbers[-1] + 1) if numbers else 1
@@ -92,7 +100,18 @@ class DB:
         # Newer SSTables override older ones for the same key.
         for sst in reversed(self._sstables):
             self.stats.sstables_probed += 1
-            found, value, is_tombstone, did_disk_read = sst.get(key)
+            (
+                found,
+                value,
+                is_tombstone,
+                did_disk_read,
+                bloom_skip,
+                bloom_fp,
+            ) = sst.get(key)
+            if bloom_skip:
+                self.stats.bloom_skips += 1
+            if bloom_fp:
+                self.stats.bloom_false_positives += 1
             if did_disk_read:
                 self.stats.disk_reads += 1
             if found:
@@ -120,7 +139,11 @@ class DB:
         path = sst_path(self._dir, self._next_sst_number)
         SSTable.write(path, items)
         self._sstables.append(
-            SSTable(path, index_interval=self._options.index_interval)
+            SSTable(
+                path,
+                index_interval=self._options.index_interval,
+                bloom_bits_per_key=self._options.bloom_bits_per_key,
+            )
         )
         self._next_sst_number += 1
 

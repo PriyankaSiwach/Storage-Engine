@@ -61,3 +61,19 @@ python bench/bench_compaction.py --keys 20000 --overwrites 20000 --deletes 2000 
 ```
 
 Results land in `bench/results/` (`stage3b_bloom.json`, `stage4_compaction.json`, etc.). Older baselines are left alone.
+
+## Crash testing
+
+```bash
+# Quick
+python bench/crash_test.py --iterations 20 --seed 42
+
+# Full
+python bench/crash_test.py --iterations 1000 --seed 42
+```
+
+The harness runs the DB in a child process, kills it with `SIGKILL` at a random time, reopens the directory, and checks that every **acknowledged** write is still present (an in-flight op may or may not be). Flushes and compactions are forced often (`memtable_max_bytes=2000`, `compaction_min_files=3`). Results go to `bench/results/crash_test.json`.
+
+**What it proves:** no acknowledged put/delete is lost across random process kills, including while flushes and compactions are happening.
+
+**What it does NOT prove:** `SIGKILL` is a process crash, not a power loss, and it does not check whether the drive actually persisted fsynced data (on macOS, plain `fsync` does not force the drive cache to flush). Random kills also rarely hit the tiny windows inside a flush or compaction; targeted crash points would be a future improvement.

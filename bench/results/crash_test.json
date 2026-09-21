@@ -1,0 +1,21 @@
+{
+  "timestamp": "2026-09-21T02:19:02.005826+00:00",
+  "settings": {
+    "iterations": 1000,
+    "seed": 42,
+    "child_options": {
+      "sync_writes": true,
+      "memtable_max_bytes": 2000,
+      "bloom_bits_per_key": 10,
+      "compaction_min_files": 3
+    }
+  },
+  "iterations_run": 1000,
+  "passed": 1000,
+  "failed": 0,
+  "average_acked_ops_per_iteration": 2180.004,
+  "iterations_with_compaction_before_kill": 965,
+  "iterations_with_sstable_at_kill": 974,
+  "runtime_s": 257.9282322910003,
+  "failures": []
+}

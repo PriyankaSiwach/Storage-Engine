@@ -1,0 +1,79 @@
+{
+  "timestamp": "2026-09-21T01:28:19.662051+00:00",
+  "settings": {
+    "keys": 20000,
+    "overwrites": 20000,
+    "deletes": 2000,
+    "lookups": 10000,
+    "memtable_bytes": 100000,
+    "seed": 42,
+    "sync_writes": false,
+    "bloom_bits_per_key": 10,
+    "compaction_min_files": 0
+  },
+  "before": {
+    "sst_files": 44,
+    "sst_bytes": 4868978,
+    "benchmarks": [
+      {
+        "name": "missing keys",
+        "lookups": 10000,
+        "sstables_probed": 440000,
+        "sstables_probed_per_lookup": 44.0,
+        "disk_reads": 3713,
+        "disk_reads_per_lookup": 0.3713,
+        "bloom_skips": 436282,
+        "p50_us": 75.375,
+        "p99_us": 106.87542000000002,
+        "lookups_per_sec": 12672.307905046498
+      },
+      {
+        "name": "existing keys",
+        "lookups": 10000,
+        "sstables_probed": 188600,
+        "sstables_probed_per_lookup": 18.86,
+        "disk_reads": 11592,
+        "disk_reads_per_lookup": 1.1592,
+        "bloom_skips": 177006,
+        "p50_us": 38.375,
+        "p99_us": 96.666,
+        "lookups_per_sec": 23206.54268555766
+      }
+    ]
+  },
+  "after": {
+    "sst_files": 1,
+    "sst_bytes": 2240000,
+    "benchmarks": [
+      {
+        "name": "missing keys",
+        "lookups": 10000,
+        "sstables_probed": 10000,
+        "sstables_probed_per_lookup": 1.0,
+        "disk_reads": 67,
+        "disk_reads_per_lookup": 0.0067,
+        "bloom_skips": 9933,
+        "p50_us": 1.917,
+        "p99_us": 2.459410000000009,
+        "lookups_per_sec": 490540.3463793683
+      },
+      {
+        "name": "existing keys",
+        "lookups": 10000,
+        "sstables_probed": 10000,
+        "sstables_probed_per_lookup": 1.0,
+        "disk_reads": 10000,
+        "disk_reads_per_lookup": 1.0,
+        "bloom_skips": 0,
+        "p50_us": 11.125,
+        "p99_us": 17.333,
+        "lookups_per_sec": 90949.1986788974
+      }
+    ]
+  },
+  "compaction_time_s": 0.16535695800121175,
+  "write_amplification": 1.6237957971676564,
+  "user_bytes_written": 4378000,
+  "sstable_bytes_written": 7108978,
+  "compactions": 1
+}

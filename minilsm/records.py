@@ -86,6 +86,11 @@ def parse_record(data: bytes, offset: int) -> tuple[str, str, int, int]:
 def read_record_at(file_obj, offset: int) -> tuple[str, str, int]:
     """Seek to offset and read one record from an open binary file (strict)."""
     file_obj.seek(offset)
+    return read_next_record(file_obj)
+
+
+def read_next_record(file_obj) -> tuple[str, str, int]:
+    """Read one record from the current file position (strict CRC check)."""
     header = file_obj.read(CRC_SIZE + FIXED_AFTER_CRC)
     if len(header) < CRC_SIZE + FIXED_AFTER_CRC:
         raise RecordError("incomplete record header")

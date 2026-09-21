@@ -3,10 +3,17 @@ from __future__ import annotations
 import bisect
 import os
 import re
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 
 from minilsm.bloom import BloomFilter
-from minilsm.records import DELETE, PUT, encode_record, parse_record
+from minilsm.records import (
+    DELETE,
+    PUT,
+    encode_record,
+    parse_record,
+    read_next_record,
+)
 
 _SST_NAME = re.compile(r"^sst_(\d+)\.sst$")
 
@@ -48,19 +55,33 @@ class SSTable:
         self._build_index()
 
     @staticmethod
-    def write(path: Path, sorted_items: list[tuple[str, tuple[str, bool]]]) -> None:
-        """Atomically write an SSTable.
+    def write(path: Path, sorted_items: list[tuple[str, tuple[str, bool]]]) -> int:
+        """Atomically write an SSTable from sorted memtable items. Returns bytes written."""
 
-        Write to path+".tmp", fsync, then rename. A crash mid-write leaves only
-        a .tmp that open() can delete — never a half-written final SSTable.
-        """
-        tmp_path = Path(str(path) + ".tmp")
-        with open(tmp_path, "wb") as f:
+        def records() -> Iterator[tuple[str, str, int]]:
             for key, (value, is_tombstone) in sorted_items:
                 # Tombstones must be persisted so deletes hide older SST values.
                 record_type = DELETE if is_tombstone else PUT
                 payload = value if not is_tombstone else ""
-                f.write(encode_record(key, payload, record_type))
+                yield key, payload, record_type
+
+        return SSTable.write_records(path, records())
+
+    @staticmethod
+    def write_records(path: Path, records: Iterable[tuple[str, str, int]]) -> int:
+        """Atomically write records from an iterator (flush or compaction).
+
+        Write to path+".tmp", fsync, then rename. A crash mid-write leaves only
+        a .tmp that open() can delete — never a half-written final SSTable.
+        Returns the number of bytes written to the SSTable.
+        """
+        tmp_path = Path(str(path) + ".tmp")
+        bytes_written = 0
+        with open(tmp_path, "wb") as f:
+            for key, value, record_type in records:
+                encoded = encode_record(key, value, record_type)
+                f.write(encoded)
+                bytes_written += len(encoded)
             f.flush()
             os.fsync(f.fileno())
 
@@ -68,6 +89,7 @@ class SSTable:
         # Make the rename durable: without a directory fsync, a crash can lose
         # the new directory entry even though the file data was synced.
         _fsync_directory(path.parent)
+        return bytes_written
 
     def _build_index(self) -> None:
         data = self._file.read()
@@ -90,6 +112,17 @@ class SSTable:
                 self._bloom.add(key)
 
         self._file.seek(0)
+
+    def iter_records(self) -> Iterator[tuple[str, str, int]]:
+        """Yield (key, value, record_type) in file order without loading the whole file."""
+        self._file.seek(0)
+        remaining = self._file_size
+        while remaining > 0:
+            before = self._file.tell()
+            key, value, record_type = read_next_record(self._file)
+            after = self._file.tell()
+            remaining -= after - before
+            yield key, value, record_type
 
     def index_entry_count(self) -> int:
         return len(self._index)
